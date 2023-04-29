@@ -1,4 +1,7 @@
-import axios, { AxiosResponse } from 'axios';
+import { AxiosResponse } from 'axios';
+import { Attributes } from './Attributes';
+import { Eventing } from './Eventing';
+import { Sync } from './Sync';
 
 interface UserProps {
   id?: number;
@@ -6,42 +9,55 @@ interface UserProps {
   age?: number;
 }
 
-type Callback = () => void;
+const rootUrl = 'http://localhost:3000/users';
 
 export class User {
-  events: { [key: string]: Callback[] } = {};
+  public events: Eventing = new Eventing();
+  public sync: Sync<UserProps> = new Sync(rootUrl);
+  public attributes: Attributes<UserProps>;
 
-  constructor(private data: UserProps) {}
+  constructor(attrs: UserProps) {
+    this.attributes = new Attributes(attrs);
+  }
 
-  get(propsName: string): string | number {
-    return this.data[propsName];
+  get on() {
+    return this.events.on;
+  }
+
+  get trigger() {
+    return this.events.trigger;
+  }
+
+  get get() {
+    return this.attributes.get;
   }
 
   set(update: UserProps): void {
-    Object.assign(this.data, update);
-  }
-
-  on(eventName: string, callback: Callback) {
-    const handler = this.events[eventName] || [];
-    handler.push(callback);
-    this.events[eventName] = handler;
-  }
-
-  trigger(eventName: string) {
-    const handler = this.events[eventName];
-
-    if (!handler || handler.length === 0) {
-      return;
-    }
-
-    handler.forEach(callback => callback());
+    this.attributes.set(update);
+    this.events.trigger('change');
   }
 
   fetch(): void {
-    axios
-      .get(`http://localhost:3000/users/${this.get('id')}`)
+    const id = this.get('id');
+
+    if (typeof id !== 'number') {
+      throw new Error('Cannot fetch without an id');
+    }
+
+    this.sync.fetch(id).then((response: AxiosResponse): void => {
+      this.set(response.data);
+    });
+  }
+
+  save(): void {
+    const data = this.attributes.getAll();
+    this.sync
+      .save(data)
       .then((response: AxiosResponse): void => {
-        this.set(response.data);
+        this.trigger('save');
+      })
+      .catch((): void => {
+        this.trigger('error');
       });
   }
 }
